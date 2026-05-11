@@ -2,7 +2,7 @@
 
 An internal implementation guide for the Betterhomes digital marketing team.
 
-This repo translates the "story, not sale" framework (Markov / LSTM / GNN / Transformer-driven journey marketing) into something concrete and buildable for **bhomes.com** — anchored in the data we already have, with an honest list of what's missing and what to request.
+This repo translates the "story, not sale" framework (Markov / LSTM / GNN / Transformer-driven journey marketing) into something concrete and buildable for **bhomes.com** — anchored in the data we already have in PostHog, with an honest list of what's broken, what's missing, and what to fix first.
 
 > **Premise:** We are no longer chasing the keyword that wins the click. We are architecting the experience that wins the buyer. Every touchpoint is a story beat. Our job is to know which beats convict, which beats break, and which beats are missing entirely.
 
@@ -10,322 +10,348 @@ This repo translates the "story, not sale" framework (Markov / LSTM / GNN / Tran
 
 ## Table of Contents
 
-1. [Where Betterhomes actually is today](#1-where-betterhomes-actually-is-today)
-2. [The buyer journey — six story beats](#2-the-buyer-journey--six-story-beats)
-3. [The stack — what's connected, what's broken, what's missing](#3-the-stack--whats-connected-whats-broken-whats-missing)
-4. [The ML layer, translated for bhomes](#4-the-ml-layer-translated-for-bhomes)
-5. [The dashboards we actually need](#5-the-dashboards-we-actually-need)
-6. [The four metrics that matter](#6-the-four-metrics-that-matter)
-7. [Implementation roadmap (phased)](#7-implementation-roadmap-phased)
-8. [Tools and connectors to request](#8-tools-and-connectors-to-request)
+1. [What the data actually says today](#1-what-the-data-actually-says-today)
+2. [The critical finding — custom event tracking is broken](#2-the-critical-finding--custom-event-tracking-is-broken)
+3. [The buyer journey — six story beats](#3-the-buyer-journey--six-story-beats)
+4. [The stack — PostHog-first, free tools where possible](#4-the-stack--posthog-first-free-tools-where-possible)
+5. [The ML layer, translated for bhomes (free-tier edition)](#5-the-ml-layer-translated-for-bhomes-free-tier-edition)
+6. [The dashboards we actually need](#6-the-dashboards-we-actually-need)
+7. [The four metrics that matter](#7-the-four-metrics-that-matter)
+8. [Implementation roadmap (phased)](#8-implementation-roadmap-phased)
 9. [What I need from you to move this forward](#9-what-i-need-from-you-to-move-this-forward)
-10. [Appendix: LinkedIn post derivatives](#10-appendix-linkedin-post-derivatives)
 
 ---
 
-## 1. Where Betterhomes actually is today
+## 1. What the data actually says today
 
-This is not a greenfield exercise. The team has already built a strong analytics foundation. The framework below is designed to extend that — not replace it.
+Numbers below are pulled directly from PostHog (project 198002, "Websites") on 2026-05-11.
 
-**What's live (verified May 2026):**
+### 1.1 Property categories — where attention actually goes
 
-| Layer | Status | Reference |
-|---|---|---|
-| Web analytics (PostHog, project "Websites" id 198002) | Live since Jul 2025, fully onboarded | All bhomes.com + eos.bhomes.com + mobile app |
-| Custom event taxonomy | 50+ "Enquiry" event types, full viewing/property funnel events | `Schedule Viewing For Sales Enquiry`, `Property Valuation Enquiry`, `similar_listing_cta_clicked`, etc. |
-| AI-channel detection | ChatGPT, Copilot/Bing, Perplexity, Gemini, Claude.ai, "For you" (engageplatform.ai) | Custom channel rules on project — ahead of most brokerages |
-| 6-stage SEO+AIO buyer journey | Built Apr 2026 by Zahra | Dashboard 1487354 — Awareness → Discovery → Research → Shortlist → Contact → Conversion |
-| Session replay + heatmaps + rage clicks | 90-day retention, opt-in true | Friction signals already captured |
-| Feature flags + experiments | Enabled | A/B infrastructure ready |
-| Meta ads creative analytics (Motion) | 4 workspaces: Al Ansari Nova Tower, Vayla, betterhomes marketing, betterhomes offplan 1 | Meta only |
-| SEO baseline (Semrush, UAE) | 11,825 organic keywords, ~180,735 monthly organic visits | Rank 444 in UAE |
+Last 180 days, pageviews by URL category:
 
-**What we know is missing — already flagged by the team:**
+| Category | Pageviews | Unique users | Sessions | Share of named categories |
+|---|---:|---:|---:|---:|
+| Sale | 225,017 | 160,285 | 165,891 | **42%** |
+| Rent | 156,507 | 103,723 | 109,283 | **29%** |
+| Blog / Market Reports | 105,169 | 73,257 | 79,236 | 20% |
+| Property Detail (uncategorized `/property/<slug>`) | 139,260 | 94,321 | 100,308 | — (overlaps above) |
+| Agent Pages | 19,303 | 11,765 | 13,896 | 4% |
+| Off-plan | 18,472 | 11,129 | 12,905 | 3% |
+| Area Guides | 7,948 | 6,162 | 6,973 | 1% |
+| Commercial | 273 | 216 | 220 | < 0.1% |
 
-- `lead_submitted` event is **not instrumented**. Zahra's funnel marks it as "⚠ needs tracking" at Stage 5. Without it, every conversion-rate number we report is a **proxy** (contact-page reach), not the real thing. This is gap #1 and everything else downstream depends on closing it.
-- Supermetrics license **expired 2026-04-24** (trial). Until renewed or replaced, we have no automated pull of Google Ads, Google Analytics, LinkedIn Ads, TikTok Ads, etc. into one place.
-- No CRM / sales-outcome data is joined to web behavior in PostHog. We can see leads enter; we cannot see which leads become deals, deal size, or time-to-close. **Without this, pCLV is impossible.**
+**What this tells us.** Sale + Rent are roughly 70% of intent. Off-plan, which the team invests heavily in (4 Motion ad workspaces — Al Ansari Nova Tower, Vayla, betterhomes offplan 1, betterhomes marketing), is only ~3% of organic pageviews. Either off-plan demand is paid-channel-only (likely — those Motion campaigns drive direct traffic that doesn't show in organic browsing), or organic discovery of off-plan is underbuilt. Blog/Market Reports is **third-biggest at 105k pageviews** — content marketing is doing real work in awareness/discovery.
+
+### 1.2 Top areas — what Dubai geography people care about
+
+Top 10 Area Guide pages, last 90 days (real human-readable areas, not internal listing IDs):
+
+| Rank | Area | Views | Users |
+|---|---|---:|---:|
+| 1 | Dubai Creek Harbour | 539 | 495 |
+| 2 | Damac Hills 2 | 259 | 208 |
+| 3 | Saadiyat Island | 186 | 168 |
+| 4 | Al Barsha | 138 | 114 |
+| 5 | Green Community | 130 | 121 |
+| 6 | Dubai Marina | 126 | 94 |
+| 7 | Arabian Ranches | 123 | 112 |
+| 8 | Majan | 123 | 106 |
+| 9 | Sheikh Zayed Road | 113 | 98 |
+| 10 | Emaar Beachfront | 96 | 84 |
+
+These are the areas the metrics should weight toward. Note **Saadiyat Island and Yas Island** in the top 20 — Abu Dhabi geography, not Dubai — meaning the framework needs to handle multi-emirate journeys, not just Dubai.
+
+### 1.3 Geographic distribution of users — who is actually visiting
+
+Last 90 days, top locations:
+
+| Location | Pageviews | Unique users | Interpretation |
+|---|---:|---:|---|
+| United States — Ashburn, VA | 211,437 | 108,343 | **Almost certainly bots** — Ashburn is the world's largest AWS datacenter cluster |
+| China (no city) | 60,952 | 60,898 | **Likely bots / proxies** — null city + 1:1 user:pageview ratio is suspicious |
+| **United Arab Emirates — Dubai** | **58,725** | **28,355** | **Primary real audience** |
+| United States — Columbus, OH | 26,828 | 21,478 | Mixed — some real expat traffic, some bot |
+| Singapore | 13,063 | 12,639 | Real — investor / expat audience |
+| Hong Kong | 12,723 | 12,659 | Real — investor / expat audience |
+| **United Arab Emirates — Abu Dhabi** | **10,670** | **6,031** | Real — second UAE city |
+| **United Arab Emirates — Sharjah** | **4,543** | **2,847** | Real — third UAE city |
+| India — Mumbai | 1,430 | 742 | Real — common origin for Dubai property buyers |
+| Pakistan — Lahore | 5,798 | 547 | Mixed — 547 users / 5,798 views = ~10 views/user, plausible |
+
+**What this tells us.** The team has a measurable bot-traffic problem — the PostHog project's `test_account_filters` currently only filters `localhost`. We are over-counting traffic by 2–3x in most dashboards. **Add a bot filter in Phase 0** (PostHog has built-in bot detection that can be enabled). The real audience splits cleanly into: domestic UAE (Dubai/Abu Dhabi/Sharjah ≈ 37k unique users) and international investors (Singapore/Hong Kong/Mumbai ≈ 16k unique users).
+
+### 1.4 SEO baseline (Semrush UAE, 2026-05)
+
+- bhomes.com: rank 444 in UAE database
+- 11,825 organic keywords
+- ~180,735 monthly organic visits
+- 0 paid keywords (we're 100% organic for SEO — paid is on Meta via Motion)
 
 ---
 
-## 2. The buyer journey — six story beats
+## 2. The critical finding — custom event tracking is broken
 
-The team's existing 6-stage funnel is the right backbone. We use it as the canonical journey across every channel — SEO, AIO (AI chatbots), paid social, direct, referral, agent-driven.
+This is the single most important thing in the doc. Read this before anything else.
 
-| Stage | Story beat | "Aha" the buyer needs | Primary signal | Where we measure it |
+**Finding.** Running a HogQL query against the events table for the last 30 days, filtering for any event that is not a standard PostHog system event (`$pageview`, `$pageleave`, `$autocapture`, `$rageclick`, `$web_vitals`, `$feature_flag_called`, `$exception`):
+
+> **Zero rows returned.**
+
+Not one custom event has fired in the last 30 days. The 50+ enquiry events in the taxonomy (`Schedule Viewing For Sales Enquiry`, `Property Valuation Enquiry`, `Contact us Enquiry`, etc.) — last fired **2025-11-03**. The viewing events (`Book a Viewing`, `Request a Viewing`) — same date. The property page custom events (`similar_listing_cta_clicked`, `overlay_displayed`) — last fired **2026-02-03**.
+
+**What this means.**
+
+- The 6-stage buyer journey dashboard (1487354) currently works because Zahra wrote it on top of `$pageview` + URL patterns, not on top of the custom event taxonomy. Smart fallback. But it's a proxy funnel, not a true funnel.
+- Every "Enquiry" dashboard the team has built is showing historical data that stopped updating six months ago. Anyone reading those dashboards today is looking at a frozen lake.
+- The `lead_submitted` event isn't just missing — the entire conversion event layer is dark.
+
+**Why this likely happened.** Most likely cause: a tracking-snippet change, a CMS migration, or a frontend release dropped the `posthog.capture('...')` calls. The events that still fire (`$pageview`, autocapture, etc.) are the ones PostHog captures automatically without code. Everything that requires an explicit `capture()` call has stopped.
+
+**This is Phase 0 priority #1, before anything else in this guide.** No ML, no Markov, no journey dashboards are worth building on broken event tracking.
+
+---
+
+## 3. The buyer journey — six story beats
+
+Zahra's 6-stage funnel is the right backbone. We use it as the canonical journey across every channel.
+
+| Stage | Story beat | Buyer's "Aha" | Signal | Live today? |
 |---|---|---|---|---|
-| 1. Awareness | "Dubai is where I should be looking." | The category is real and relevant to me. | Branded + non-branded impressions | Semrush organic + Motion paid reach |
-| 2. Discovery | "Betterhomes exists and seems credible." | First-touch on bhomes.com from any channel. | First `$pageview` per `distinct_id` | PostHog — already in dashboard 1487354 |
-| 3. Research | "These properties match my situation." | Engagement with listings, area guides, market reports. | Property page views, `similar_listing_hover`, `View Photos`, `Area Guide Details Enquiry` | PostHog event taxonomy is mature here |
-| 4. Shortlist | "I'm narrowing to a few I'd actually pursue." | Repeated visits to the same listings; favorites; CTA hovers without clicks. | `Add to Favorites`, `Add to Favorites on PLP`, `Add to Likes`, `similar_listing_cta_clicked`, `view_properties_cta_clicked` | Already tracked |
-| 5. Contact | "I'm ready to talk to a human." | Phone / WhatsApp / email click; form submit; viewing booked. | `Attempt Contact Agent`, `Book a Viewing`, `Request a Viewing`, the 50+ `Enquiry` events | Tracked at the *attempt* level, **not always at the success/submit level** |
-| 6. Conversion | "I picked Betterhomes." | Signed deal — lead → tenancy / sale closed. | `lead_submitted` + CRM deal-closed status | **Not yet tracked** — gap #1 |
+| 1. Awareness | "Dubai is where I should be looking." | Category is real and relevant. | Branded + non-branded impressions | Semrush (yes), paid (yes via Motion) |
+| 2. Discovery | "Betterhomes exists and seems credible." | First touch on bhomes.com. | First `$pageview` per `distinct_id` | ✅ Yes |
+| 3. Research | "These properties match my situation." | Property + area-guide engagement. | Property page views, scroll depth, time-on-page | ⚠️ Pageview-only (custom events dark) |
+| 4. Shortlist | "I'm narrowing to a few I'd pursue." | Repeat visits, favorites, CTA hovers. | `Add to Favorites`, `similar_listing_cta_clicked` | ❌ Dark since Feb 2026 |
+| 5. Contact | "I'm ready to talk to a human." | Phone/WhatsApp/email click, form submit. | Contact page reach (proxy), 50+ Enquiry events | ❌ Dark since Nov 2025 |
+| 6. Conversion | "I picked Betterhomes." | Signed deal — lead → close. | `lead_submitted` + CRM | ❌ Not instrumented; CRM (Engage/Metabase) not accessible to us |
 
-The job of the framework is to make this journey **measurable end-to-end, predictable mid-funnel, and intervenable in real time.**
+Stages 4–5 are technically tracked in the schema but not firing. Stage 6 needs both (a) `lead_submitted` instrumentation, and (b) future CRM access.
 
 ---
 
-## 3. The stack — what's connected, what's broken, what's missing
+## 4. The stack — PostHog-first, free tools where possible
 
-### Connected and healthy
+We're operating PostHog-only for now (CRM access via Engage/Metabase is deferred until we get visibility into it). Free ML tooling where possible. No paid procurement asks in the near term.
 
-- **PostHog (project Websites, id 198002).** Full session-level event stream for bhomes.com, eos.bhomes.com, mobile app (Amplitude events imported). HogQL available for any custom query. 34 dashboards live. Already running funnels, paths, retention.
-- **Motion (org "Bhomes", 4 workspaces).** Meta ads creative analytics. Useful for Stages 1–2 (Awareness, Discovery) on paid social. Meta-only — no TikTok / YouTube / LinkedIn coverage here.
-- **Semrush.** Full domain research, keyword research, backlink, traffic analytics, competitive intel for the UAE database (and globally).
+### 4.1 What we use
 
-### Connected but broken / unused
-
-- **Supermetrics — license expired 2026-04-24.** Until renewed, we cannot auto-pull Google Ads, GA4, Meta Ads (independent of Motion), TikTok Ads, LinkedIn Ads, Microsoft Ads, Bing, Search Console, HubSpot, Shopify, etc. into one queryable place. 169 platforms are supported once active.
-
-### Missing / not connected
-
-| Missing data | Why it matters | Suggested source |
+| Layer | Tool | Status |
 |---|---|---|
-| **CRM sales-outcome data** (lead → viewing → offer → close) | Without it: no pCLV, no real attribution to revenue, no closed-loop on which journeys actually pay. | Salesforce / HubSpot / Bayut / Property Finder feed → PostHog data warehouse via webhook or Supermetrics |
-| **Google Analytics 4 + Google Search Console** | GSC keywords by landing page, GA4 cross-device, paid + organic union. Semrush is third-party estimates; GSC is ground truth. | Supermetrics (once renewed) or PostHog Marketing Analytics product (already shown intent) |
-| **Reviews / sentiment text** (Google Business, Trustpilot, Property Finder agent reviews, support transcripts) | Required for Transformer sentiment/intent analysis. Right now we have zero brand-sentiment time series. | Trustpilot API, Google Business Profile API, in-app surveys |
-| **ML compute environment** | Markov chains we can run in HogQL. LSTM / GNN / Transformer training cannot run inside PostHog. | One of: Databricks, AWS SageMaker, Google Vertex AI, or a single GPU instance + Python notebooks for prototyping |
-| **TikTok, YouTube, LinkedIn organic + paid** | Multi-touch attribution needs every touchpoint. Right now we are blind to anything outside Meta and Google. | Supermetrics covers all three — single highest-leverage unlock once renewed |
-| **Email engagement** (open/click → on-site behavior) | Newsletters drive Stages 1–3; we need them linked to the same `distinct_id`. | Mailchimp / Klaviyo / HubSpot tracking pixel firing PostHog `$identify` |
+| Web/product analytics | **PostHog** (project 198002) | Primary source of truth |
+| HogQL queries | PostHog data warehouse | Already used by Zahra's dashboards |
+| Sankey / Paths / Funnels / Cohorts | PostHog native features | Underused — Phase 1 unlock |
+| Session replay + heatmaps + rage clicks | PostHog | Live, 90-day retention |
+| Feature flags + experiments + surveys | PostHog | Live, underused for surveys (good for sentiment Phase 3) |
+| Meta ad creative analytics | Motion (4 workspaces) | Meta only |
+| SEO research | Semrush | Use via MCP for keyword + competitor research |
+| Python / ML environment | **Google Colab (free)** for notebooks, **local Python** on your PC for prototyping | No procurement needed |
+| LLM inference for sentiment | Claude / OpenAI / Gemini API — pay-per-call, minimal $ | No procurement needed |
+
+### 4.2 What we're deferring (not blocking us today)
+
+- **CRM data join** (Engage / Metabase). Once we get access, pCLV becomes real. Until then, journey-based proxies.
+- **Supermetrics renewal**. License expired 2026-04-24. We can revisit once PostHog Marketing Analytics has fully replaced what we need, or once a specific source (e.g. GA4, Google Ads) becomes a bottleneck.
+- **TikTok / LinkedIn / Google Ads connectors**. Not needed yet — Meta + organic + AI search cover today's mix.
+
+### 4.3 Free ML environment options (pick one or use both)
+
+| Option | Good for | Limits |
+|---|---|---|
+| **Google Colab (free tier)** | Markov attribution, basic LSTM, sentiment scoring via API, exploratory notebooks | 12-hour runtime cap, free GPU is small (T4), no persistent storage (save to Drive) |
+| **Local Python on your PC** | Markov, transition matrices, dashboarding, anything that doesn't need GPU | Limited by your machine; fine for everything Phase 0–2 |
+| Kaggle Notebooks (free) | LSTM training, free GPU sessions (30 hrs/week) | Same limits as Colab roughly |
+| **GitHub Codespaces (60 free hrs/month for individual accounts)** | Same as local Python but in cloud | Hours cap; no GPU on free tier |
+| Hugging Face Spaces (free) | Hosting a small Transformer model behind an API | Sleeps after inactivity; CPU only on free tier |
+
+**Recommended starting setup:** Colab for any notebook work + local Python for everyday scripts. Free, no IT involvement, runs anywhere.
 
 ---
 
-## 4. The ML layer, translated for bhomes
+## 5. The ML layer, translated for bhomes (free-tier edition)
 
-The LinkedIn post listed four model families. Here is what each one actually means for a Dubai brokerage, what data it requires, and whether we can do it today.
+Four model families from the original framework. For each: what it does for bhomes, what data it needs, what we can build today on PostHog + Colab.
 
-### 4.1 Markov Chains + Hidden Markov Models — Multi-Touch Attribution
+### 5.1 Markov Chains + Hidden Markov Models — Multi-Touch Attribution
 
-**What it does.** Given a sequence of touchpoints per user (e.g. `Instagram ad → bhomes.com area guide → property page → WhatsApp click → form submit`), it calculates the **removal effect** of each touchpoint — what fraction of conversions would disappear if that touchpoint did not exist. This is how you replace last-click attribution.
+**For bhomes.** A typical Dubai buyer journey touches 6–12 surfaces: a Property Finder listing, an Instagram reel, a Google search for "apartments in Dubai Creek Harbour", a market-report download, a return visit, a WhatsApp tap. Last-click attribution credits whichever fired last (usually branded search or direct). Markov tells us which steps actually drive conversion via removal effect.
 
-**Why it matters for bhomes.** A typical Dubai buyer journey touches 6–12 surfaces before they call an agent: a Property Finder listing, an Instagram reel, a Google search, a market report download, a returning visit, a WhatsApp tap. Last-click attribution credits whichever one happened to fire last — usually direct or branded search — and starves the channels that actually built the case.
+**Data.** Ordered event sequence per `distinct_id`. **Right now this is pageview sequences only** (custom events are dark). That still works — pageview type + URL pattern gives us a meaningful step taxonomy.
 
-**Data needed.** Ordered event sequence per `distinct_id`, with the conversion endpoint defined (right now: any `Enquiry` event; eventually: `lead_submitted` and then CRM-closed-deal).
+**Build today, free.** HogQL pull → Colab notebook:
 
-**Where we are.** PostHog already has all the sequence data. We can run a basic Markov attribution **today** with HogQL + a Python script that pulls the event log via the PostHog API. Sketch:
+```python
+# In Colab — install once
+!pip install pandas posthog
 
-```sql
+# Pull ordered sessions
+import requests
+PROJECT = 198002
+API_KEY = "phx_<personal_api_key>"  # generate in PostHog account settings
+query = """
 SELECT distinct_id,
-       arraySort(x -> x.2, groupArray((event, timestamp))) AS touchpoints,
-       max(if(event LIKE '%Enquiry%' OR event = 'lead_submitted', 1, 0)) AS converted
+       arraySort(x -> x.2, groupArray((properties.$current_url, timestamp))) AS path,
+       max(if(properties.$current_url LIKE '%/contact%', 1, 0)) AS reached_contact
 FROM events
-WHERE timestamp >= now() - INTERVAL 90 DAY
+WHERE event = '$pageview'
+  AND timestamp >= now() - INTERVAL 90 DAY
 GROUP BY distinct_id
-HAVING length(touchpoints) >= 2
+HAVING length(path) >= 2
+"""
+# Hit https://us.posthog.com/api/projects/{PROJECT}/query/ with the HogQL query
+# Then build a transition matrix and compute removal effect in pandas
 ```
 
-Export → Python (`pandas` + `pychattr` or a hand-rolled transition matrix) → removal-effect per channel.
+We will iterate this query into a proper script in Phase 2.
 
-**Gap.** HMM (hidden states — "curious", "comparing", "ready") requires latent-state modeling that's beyond HogQL. Build in a notebook environment.
+**HMM (hidden states like "curious", "comparing", "ready").** Needs `hmmlearn` in Python. Runs fine in Colab on CPU. Phase 3.
 
-### 4.2 RNNs and LSTMs — Next-Action Prediction
+### 5.2 RNNs and LSTMs — Next-Action Prediction
 
-**What it does.** Given the last N events for a user, predicts the next event and its probability. Trained on historical sequences where we know the outcome.
+**For bhomes.** Given the first 3–5 pages a user visits, predict whether they'll reach the contact page or drop off. Useful for: deciding when to fire an overlay (`overlay_displayed` infrastructure exists even if dark right now), trigger a WhatsApp ping, or surface a different listing.
 
-**Why it matters for bhomes.** Real-time intervention. If the model predicts "this user is 80% likely to drop off in the next 2 minutes," we can fire an overlay (we already have `overlay_displayed` events — the infrastructure is there), trigger a WhatsApp ping, or surface a different listing.
+**Data.** Tokenized page sequences. We have this.
 
-**Data needed.** Tokenized event sequences with timestamps. PostHog has this.
+**Build.** Train a small GRU (faster than LSTM, comparable results) in Colab with Keras. Score live sessions via PostHog's reverse-ETL or by writing predictions back as a person property via the API. **Realistic Phase 3 build:** ~2–3 weeks once Phase 0 (event tracking) is fixed.
 
-**Where we are.** Data is ready. Model training is not — we need a Python environment, GPUs (or just CPU for a small LSTM), and a way to score live sessions back into PostHog as a person property (`predicted_next_action`, `dropoff_risk_score`) so we can target overlays / feature flags / workflows on it.
+### 5.3 Graph Neural Networks — Hidden touchpoint relationships
 
-**Realistic first build.** A binary classifier — "will this session end in an Enquiry event?" — using a simple GRU/LSTM on the first 5 events of each session. We can ship this in 2–3 weeks once we have a Python env.
+**For bhomes.** Finds non-obvious combinations: "users who read Q1 market report AND visit Dubai Creek Harbour area guide AND view 3+ listings convert at 8x base rate." Patterns last-click and Markov miss.
 
-### 4.3 Graph Neural Networks — Hidden touchpoint relationships
+**Verdict.** **Don't build this in 2026.** It needs (a) custom events firing, (b) CRM outcomes for training labels, (c) a non-trivial PyTorch Geometric setup. Tag it as the Phase 4 frontier.
 
-**What it does.** Treats users, touchpoints, content, and agents as nodes in a graph; edges are interactions. Learns which combinations of touchpoints (not individual ones) drive conversion.
+### 5.4 Transformers — Sentiment and Intent
 
-**Why it matters for bhomes.** "A user who reads the Q1 market report AND visits an area guide AND looks at 3+ off-plan listings converts at 8x the base rate" — that's the kind of insight last-click and even Markov cannot give you. GNNs find these multi-hop patterns automatically.
+**For bhomes.** Read text → output sentiment + intent. Sources we could plug in:
 
-**Data needed.** The same event stream, but transformed into a graph. Plus content metadata (which area guide, which listing, which agent, which area).
+| Source | How to get it | Status |
+|---|---|---|
+| **PostHog Surveys** | Enabled, underused. Launch one survey on key pages today, get free text in 24 hours. | Easiest start |
+| Google Business Profile reviews | Free API, per branch | Medium — needs API key |
+| Property Finder agent reviews | Likely no public API; would need scraping or partnership | Hard |
+| Bayut agent reviews | Same | Hard |
+| Trustpilot | Free tier API | Easy |
+| Support transcripts | If Betterhomes uses Zendesk/Intercom/Freshdesk | Depends on tool |
 
-**Where we are.** This is the most ambitious of the four. **Don't build this until phases 1–3 are working and we have the lead → close loop closed.** Without `lead_submitted` and CRM outcomes, the graph has nothing to optimize against.
+**Build.** No model training required. Pipe text into Claude or OpenAI API ($1–5/month at our volume) and ask for sentiment + intent label. Aggregate in PostHog as a person/property dimension.
 
-### 4.4 Transformer Models — Sentiment and Intent
-
-**What it does.** Reads text (reviews, support transcripts, comments, survey responses) and outputs sentiment, intent, and topic. Modern variants (e.g. an off-the-shelf BERT-family model, or just calling Claude / GPT via API) do this well out of the box.
-
-**Why it matters for bhomes.** Are people telling Google Reviews that our agents are slow to respond? Are off-plan buyers complaining about a specific developer in support tickets? Is the brand story landing emotionally, or is it landing as "another brokerage"?
-
-**Data needed.** **Text we do not currently have in one place.** Sources to assemble:
-- Google Business Profile reviews (per branch / per agent if linked)
-- Property Finder / Bayut agent reviews
-- Trustpilot
-- Support ticket transcripts (if Zendesk / Intercom / Freshdesk is in use)
-- In-app survey responses (PostHog Surveys is enabled but underused)
-- Social comments on Meta posts (Motion does not pull these — would need a separate listener)
-
-**Where we are.** Easiest of the four to start once text is available. We do not need to train anything — we can call Claude or OpenAI via API and get sentiment + intent labels in one prompt. The work is the data plumbing, not the model.
+**First build:** Launch a 1-question PostHog Survey ("What's the one thing that almost stopped you from contacting us?") on the contact page. Score responses with Claude weekly. Phase 3 candidate that doesn't need CRM data.
 
 ---
 
-## 5. The dashboards we actually need
+## 6. The dashboards we actually need
 
-### 5.1 Sankey — story-flow visualization
+### 6.1 Sankey path visualization
 
-PostHog Paths insight already does Sankey diagrams natively. We have not used them for the full journey yet. Build one with these waypoints:
+PostHog Paths insight does this natively. Build one with URL-based waypoints (since custom events are dark):
 
 ```
-Entry channel → Stage 2 page type → Stage 3 engagement event → Stage 4 shortlist signal → Stage 5 contact action → Stage 6 outcome
+Entry channel → Top landing page → Property/area page → Contact page → Exit
 ```
 
-This single visual tells us where the narrative breaks. Status: build-ready in PostHog UI, no new infrastructure needed.
+Status: build-ready in PostHog UI once Phase 0 fixes bot-filter contamination.
 
-### 5.2 Predictive cohort grids
+### 6.2 Predictive cohort grids
 
-PostHog Cohorts is enabled. Today we group by signup date. The framework asks us to group by **journey type**:
+PostHog Cohorts is enabled. Group by **journey type**, not signup date. Recommended cohorts:
 
-- "Read market report first" cohort
-- "Came via ChatGPT" cohort (Copilot/Bing is actually our largest AI source per Zahra's dashboard — interesting)
-- "Off-plan-only researcher" cohort
-- "High-frequency returner, no contact" cohort (these are the cold leads worth re-engaging)
+- "AI-referred" (Copilot/Bing leads — non-obvious finding from Zahra's dashboard)
+- "Market-report-first" (entered via Blog/Reports — 20% of named-category pageviews)
+- "Off-plan-only researcher" (3% of organic, big paid investment)
+- "High-frequency returner, no contact" (cold leads worth re-engaging)
+- "Investor expat" (Singapore/HK/Mumbai geo + sale-category interest)
 
-Each cohort gets compared on time-to-Enquiry, Enquiry rate, and (once we have it) deal-close rate.
+### 6.3 Real-time velocity tracking
 
-### 5.3 Real-time velocity tracking
-
-PostHog supports live event streams. The dashboard we want shows, in real time:
-- Active sessions by stage (how many users currently in Discovery vs. Research vs. Shortlist)
-- Avg minutes spent per stage across the last hour
+PostHog supports live event streams. Once Phase 0 is done, we can show:
+- Active sessions by stage
+- Avg minutes per stage in the last hour
 - Stage-to-stage transition rate
-- Friction signals: `$rageclick`, `$exception`, time-on-page > 90s without scroll
-
-Status: build-ready, but requires designing the stage-classification logic (HogQL view that labels each session's current stage).
+- Friction signals: `$rageclick`, `$exception`, dead-clicks
 
 ---
 
-## 6. The four metrics that matter
+## 7. The four metrics that matter
 
-These are the framework's headline metrics, instantiated for bhomes.
+### 7.1 Time-to-Value (TTV)
 
-### 6.1 Time-to-Value (TTV)
+Seconds between first `$pageview` and first meaningful "Aha" — practical proxy: first time on a property page after a search.
 
-**Definition for bhomes.** Seconds between first `$pageview` and the user's first meaningful "Aha" event — typically the first time they view a property page that matches their later-stated criteria (location + price + bedrooms).
+**Today:** HogQL-buildable on pageviews alone. Build it.
 
-**Why it's hard.** We don't yet capture "criteria" cleanly. The closest proxy is the first listing they click on after a search, treating its attributes as revealed preference.
+### 7.2 Micro-Conversion Velocity
 
-**Quick win.** Measure TTV as "seconds from first `$pageview` to first `View Photos` event" — this is rough but actionable today.
+Cumulative "yes" events per session per stage.
 
-### 6.2 Micro-Conversion Velocity
+**Today:** Depends on the custom events being live. Tracked as a stretch goal until Phase 0 closes.
 
-**Definition for bhomes.** Cumulative count of small "yes" events per session per stage:
-- Stage 2 micros: scroll past hero, view top nav
-- Stage 3 micros: `View Photos`, `View Map`, `similar_listing_hover`, area guide scroll-depth
-- Stage 4 micros: `Add to Favorites`, `view_properties_cta_hover`
-- Stage 5 micros: hover over phone/WhatsApp/email CTAs, expand contact agent card
+**Interim proxy:** scroll depth + time-on-page + pages-per-session per stage, all derivable from pageviews.
 
-Plot velocity (micros per minute) per stage. A user pulling 8 micros/min through Stage 3 is hot; one pulling 1/min is browsing.
+### 7.3 Path-to-Purchase Complexity
 
-**Status.** All events exist. Need a HogQL view + dashboard tile.
+Median count of distinct page types between first `$pageview` and a Stage-5 signal (contact page reach), by channel.
 
-### 6.3 Path-to-Purchase Complexity
+**Today:** Buildable. Single best leading indicator of whether the framework is working. **Build this first in Phase 1.**
 
-**Definition for bhomes.** Median count of distinct event types (deduplicated) between first `$pageview` and first `Enquiry` event, by channel.
+### 7.4 Predictive Customer Lifetime Value (pCLV)
 
-**What good looks like.** Falling complexity means the story is getting clearer. Rising complexity means we're adding noise (or attracting less-qualified traffic).
+Forecast revenue per user given journey type + channel + category interest + engagement depth.
 
-**Status.** Computable in HogQL today. This is the single best leading indicator of whether the framework is working.
-
-### 6.4 Predictive Customer Lifetime Value (pCLV)
-
-**Definition for bhomes.** Forecast revenue from a user given (a) journey type, (b) channel, (c) property category interest (rent vs. sale vs. off-plan), (d) engagement depth. Trained on historical lead → closed-deal outcomes.
-
-**Status.** **Blocked on CRM data.** Until lead-to-deal status is in PostHog (or PostHog's data warehouse), this is a wish, not a metric. It is the prize at the end of phase 3.
+**Today: blocked.** Until we get CRM access (Engage / Metabase), we can't train on lead → close. **Interim proxy:** journey-quality score (weighted sum of micro-conversion velocity, stage progression, friction inverse). Treat it as "engagement value" today; upgrade to revenue value when CRM data lands.
 
 ---
 
-## 7. Implementation roadmap (phased)
+## 8. Implementation roadmap (phased)
 
-Sequenced so each phase produces working value before the next starts. Don't skip phase 0.
+### Phase 0 — Fix the foundation (weeks 1–3)
 
-### Phase 0 — Fix the foundation (weeks 1–2)
+Goal: get the tracking layer back to a state where every other phase is meaningful.
 
-Goal: every other phase is wasted effort if conversion isn't measured.
+- **0.1 — Audit custom event firing.** Pull a recent build of bhomes.com and verify which `posthog.capture(...)` calls are still present in the codebase vs. expected. Compare against the 50+ event names in the taxonomy.
+- **0.2 — Restore conversion event tracking site-wide.** Specifically: every enquiry form on bhomes.com (main, blog, off-plan, Unbounce), every WhatsApp/phone/email CTA, every viewing-related action.
+- **0.3 — Add the unified `lead_submitted` event** alongside existing form-specific events, with properties `form_type`, `property_id`, `enquiry_type`, `area_guide` (if applicable). This is the one event the journey funnel needs.
+- **0.4 — Enable PostHog bot filtering.** Currently `test_account_filters` only excludes localhost. Add country-based or AWS-IP-range filters for the obvious bot sources (Ashburn, bare-China-no-city). Even a simple `$geoip_city_name = 'Ashburn'` exclusion rule would clean up most dashboards immediately.
+- **0.5 — Document the canonical event spec** in this repo so the team has one place to look up "what should fire when".
 
-- **0.1** Instrument `lead_submitted` event everywhere a real lead is created — every form on bhomes.com, blog enquiry forms, WhatsApp click-through that fires a CRM record, off-plan flows, viewings, valuation. This is the team's own flagged gap (Zahra's funnel) and it should not wait.
-- **0.2** Decide: renew Supermetrics, or move marketing-data ingestion into PostHog Marketing Analytics (already shown product intent — id 198002 has `marketing_analytics` intent timestamp Jan 2026). Don't run both. Recommend renewing Supermetrics short-term while PostHog Marketing Analytics matures, because Supermetrics covers more sources today.
-- **0.3** Choose a single CRM-of-record for sales outcomes and confirm we can webhook deal-stage changes into PostHog. Surface the question to whoever owns CRM at Betterhomes.
+**Exit criteria.** Running the "any custom event in last 7 days" query returns non-zero rows. Director Overview dashboard (1312369) reflects real, current activity.
 
-**Exit criteria.** A working end-to-end funnel from first `$pageview` → `lead_submitted` → CRM `deal_closed`, queryable in one HogQL query.
+### Phase 1 — PostHog-native quick wins (weeks 4–7)
 
-### Phase 1 — PostHog-native quick wins (weeks 3–6)
+No external tooling.
 
-No new tools. Pure leverage of what's already there.
+- **1.1** Sankey path insight from entry channel → contact page.
+- **1.2** Five journey-type cohorts (Section 6.2).
+- **1.3** Path-to-Purchase Complexity dashboard tile + TTV tile (the two metrics buildable today).
+- **1.4** HogQL view that tags each session with its current stage; reuse across dashboards.
+- **1.5** Launch 1 PostHog Survey on the contact page for the Transformer sentiment pipeline (Phase 3 prep).
 
-- **1.1** Build a Sankey path insight covering Stage 2 → Stage 6 (now possible because Stage 6 exists).
-- **1.2** Define cohorts by journey type, not signup date. Start with 4: "AI-referred", "Market-report-first", "Off-plan-only", "High-frequency-returner".
-- **1.3** Add the four metrics (TTV, Micro-Conversion Velocity, Path-to-Purchase Complexity, pCLV-proxy) as a single dashboard. The first three are HogQL queries; pCLV uses average historical deal size by cohort until ML lands.
-- **1.4** Stage-classification HogQL view: a derived column that tags every session with its current stage. Reused by every downstream dashboard.
+### Phase 2 — HogQL attribution + journey scoring (weeks 8–11)
 
-**Exit criteria.** Director Overview dashboard (1312369) gains a "Journey health" section that reports the four metrics weekly.
+- **2.1** Markov attribution in HogQL → Colab notebook → channel report. First "Markov vs. last-click" report shared with directors.
+- **2.2** Journey-quality score (engagement value) as a session property, written back to PostHog via API.
 
-### Phase 2 — HogQL attribution + journey scoring (weeks 7–10)
+### Phase 3 — ML layer in Colab (weeks 12–20)
 
-Still no external ML — just better SQL.
+- **3.1** GRU/LSTM next-action predictor in Colab, scored back into PostHog as `dropoff_risk_score` person property.
+- **3.2** HMM with 3 hidden states ("curious", "comparing", "ready") on event sequences.
+- **3.3** Transformer sentiment via Claude/OpenAI API on accumulated PostHog Survey responses + (if available) Google Business Profile reviews via free API.
 
-- **2.1** Build a basic Markov attribution table in HogQL (transition matrix, removal effect estimates). Output: revenue / leads credited per channel under Markov vs. last-click. Expect Meta and AIO to be undercounted; expect branded search to be overcounted.
-- **2.2** Compute a "journey-quality score" per session: weighted sum of micro-conversion velocity, stage progression, and friction signals. Use it to rank live sessions for the agent For-You page.
+### Phase 4 — Advanced (parked)
 
-**Exit criteria.** First "Markov vs. last-click" attribution report shared in a director meeting.
-
-### Phase 3 — ML layer (weeks 11–20)
-
-Now we need a Python environment. Decision needed in Phase 0 on which one.
-
-- **3.1** Train LSTM next-event predictor; deploy as a PostHog person-property reverse-ETL.
-- **3.2** Train HMM with hidden states ("curious", "comparing", "ready"). Surface state on Director Overview.
-- **3.3** Transformer sentiment pipeline on whichever text source we managed to assemble (recommend starting with Google Business Profile reviews — easiest API).
-
-**Exit criteria.** Real-time `dropoff_risk_score` per session usable as a feature-flag input to trigger overlays / agent outreach.
-
-### Phase 4 — Graph + advanced (quarter 4+)
-
-GNN on the touchpoint graph. Only if Phases 0–3 are paying off and we have CRM outcomes flowing. This is the "next year" frontier, not a current commitment.
-
----
-
-## 8. Tools and connectors to request
-
-Concrete asks, ranked by leverage.
-
-| Priority | Ask | Unlocks | Effort to get |
-|---|---|---|---|
-| P0 | `lead_submitted` instrumentation across all forms | Real Stage 6 measurement, real attribution, pCLV becomes possible | Engineering ticket; small |
-| P0 | CRM webhook → PostHog data warehouse | Closed-loop attribution, revenue per channel, pCLV training data | Depends on CRM owner; medium |
-| P1 | Supermetrics renewal **or** PostHog Marketing Analytics activation | Google Ads, GA4, GSC, TikTok, LinkedIn data joined to web behavior | Procurement / config; small |
-| P1 | Python ML environment (recommend a single Databricks workspace or AWS SageMaker Studio) | Markov, LSTM, HMM, Transformer training | Procurement + IT; medium |
-| P2 | Google Business Profile API access | Transformer sentiment on real reviews | Small; just credentials |
-| P2 | Trustpilot + Property Finder + Bayut review feeds | Multi-source brand sentiment | Per-vendor API agreements |
-| P2 | TikTok + LinkedIn ad accounts connected (via Supermetrics) | Full multi-touch attribution beyond Meta + Google | Comes free once Supermetrics is renewed |
-| P3 | Email platform (Mailchimp / Klaviyo / HubSpot) firing `$identify` on click | Newsletter touch in the journey graph | Engineering ticket; small |
-| P3 | GPU instance OR API budget for Claude / OpenAI for transformer scoring | If we don't want to train our own | Small if API-only |
+GNN, full pCLV with CRM data — only after we get Engage/Metabase access and Phases 0–3 are paying off.
 
 ---
 
 ## 9. What I need from you to move this forward
 
-To turn this guide into shipped work, I need decisions or info from you on:
+To start Phase 0, I need decisions / info on:
 
-1. **Who owns `lead_submitted`?** Front-end team? CMS team? Each form might be in a different codebase (main site, blog, off-plan microsites, Unbounce). Need a single owner who can audit and instrument all of them.
-2. **Which CRM is the source of truth for closed deals?** And does Betterhomes already webhook events out of it? If not, who can build that webhook?
-3. **What's the budget posture for Supermetrics renewal vs. PostHog Marketing Analytics?** Both cost money. Picking one unblocks Phase 0.
-4. **Do we have a Python / ML environment already (e.g. someone using Colab, a Databricks instance, a data-science seat anywhere in the company)?** If yes, we use it. If no, we need to request one before Phase 3.
-5. **Brand-voice constraints for any public output.** If we eventually publish a Betterhomes-version of the LinkedIn post (see Appendix), what we can and can't say about the underlying methodology and numbers.
-6. **Confirmation of which agents / regions / property categories matter most.** The framework is generic; we should weight metrics by where Betterhomes actually makes money (rental commissions vs. sale commissions vs. off-plan vs. property management).
+1. **Who owns the bhomes.com frontend code?** Phase 0 is mostly an engineering ask — someone needs to (a) audit which `posthog.capture(...)` calls are still in the codebase, (b) restore the missing ones, (c) add `lead_submitted`. Whoever owns the main site + the blog + the off-plan microsites + Unbounce. Could be one team or four.
+2. **When can we get read-only access to Engage / Metabase** (or the Engage CRM data layer)? Even a CSV export of "lead created → outcome" per month would unblock pCLV in Phase 2 rather than Phase 4.
+3. **Bot filter scope.** Are you OK with us aggressively filtering Ashburn + bare-China-no-city + AWS IP ranges from all marketing dashboards? Director Overview will look smaller but truer.
+4. **Confirmation on category weighting for metrics.** Based on what I'm seeing in PostHog: **Sale (42%) and Rent (29%) should be the primary focus**, Blog/Reports (20%) is the awareness driver, Off-plan (3% organic but heavy paid via Motion) gets a separate "paid funnel" view, and Area Guides (1%) get used as the geo-routing layer (Dubai Creek Harbour, Damac Hills 2, Saadiyat Island lead the list). Does that match how you'd weight it internally?
+5. **Survey question for Phase 1.** I suggested "What's the one thing that almost stopped you from contacting us?" on the contact page. Do you want to phrase it differently, or run it elsewhere?
 
-Send me answers to these and I'll start scoping Phase 0 tickets and the first version of the journey-health dashboard.
-
----
-
-## 10. Appendix: LinkedIn post derivatives
-
-When we're ready to put a Betterhomes flavor of the original post out — internally or externally — these are the angles that hold up:
-
-- **"Why we stopped trusting last-click."** Concrete: a Markov attribution comparison showing X% of credit shifts from branded search to AI + content. Lands well with peers and property-tech operators.
-- **"Six story beats of a Dubai property buyer."** The 6-stage journey above, with anonymized numbers. Lands well with prospective clients (sellers/landlords listing with us) — it signals sophistication.
-- **"What an AI buyer's journey actually looks like."** Because Copilot/Bing leads our AI traffic, not ChatGPT — that's a genuinely non-obvious finding worth a post on its own.
-- **"The metrics that replaced the funnel."** TTV, Micro-Conversion Velocity, Path-to-Purchase Complexity, pCLV — framed as "this is how we now run digital at Betterhomes."
-
-Each of these is one short post, not a thesis. Keep the methodology high-level in public; keep the numbers internal until Phase 0 closes the conversion-tracking gap.
+Answer 1 and 3 and I can start drafting Phase 0 tickets. The others can wait a week.
 
 ---
 
